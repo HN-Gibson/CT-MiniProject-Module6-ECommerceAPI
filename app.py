@@ -28,11 +28,22 @@ class ProductSchema(ma.Schema):
     class Meta:
         fields = ("name", "price", "id")
 
+class CustomerAccountSchema(ma.Schema):
+    username = fields.String(required=True, validate=validate.Length(min=1))
+    password = fields.String(required=True, validate=validate.Length(min=1))
+    customer_id = fields.Integer(required=True)
+
+    class Meta:
+        fields = ("username", "password", "customer_id", "id")
+
 customer_schema = CustomerSchema()
 customers_schema = CustomerSchema(many=True)
 
 product_schema = ProductSchema()
 products_schema = ProductSchema(many=True)
+
+customer_account_schema = CustomerAccountSchema()
+customer_accounts_schema = CustomerAccountSchema(many=True)
 
 #---------------------------------------------------------------------------------------------------------------------------------
 
@@ -42,7 +53,9 @@ class Customer (db.Model):
     name = db.Column(db.String(255), nullable=False)
     email = db.Column(db.String(320))
     phone = db.Column(db.String(15))
+    customer_account = db.relationship('CustomerAccount', back_populates='customer')
     orders = db.relationship('Order', backref='customer')
+    
 
 class Order (db.Model):
     __tablename__ = 'orders'
@@ -56,7 +69,7 @@ class CustomerAccount (db.Model):
     username = db.Column(db.String(255), unique=True, nullable=False)
     password = db.Column(db.String(255), nullable=False)
     customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'))
-    customer = db.relationship('Customer', backref='customer_account', uselist=False)
+    customer = db.relationship('Customer', back_populates='customer_account')
 
 order_product = db.Table('Order_Product',
         db.Column('order_id', db.Integer, db.ForeignKey('orders.id'), primary_key=True),
@@ -118,14 +131,56 @@ def delete_customer(id):
     db.session.commit()
     return jsonify({"message":"Customer removed successfully"}), 200
 
-@app.route("/customers/by-email", methods=['GET'])
-def query_customer_by_email():
-    email=request.args.get('email')
-    customer=Customer.query.filter_by(email=email).first()
-    if customer:
-        return customer_schema.jsonify(customer)
-    else:
-        return jsonify({"message": "Customer not found"}), 404
+@app.route("/customers/<int:id>", methods=['GET'])
+def query_customer_by_id(id):
+    customer=Customer.query.get_or_404(id)
+    return customer_schema.jsonify(customer)
+
+#---------------------------------------------------------------------------------------------------------------------------------
+
+@app.route("/customer_accounts", methods=["POST"])
+def add_customer_account():
+    try:
+        customer_account_data = customer_account_schema.load(request.json)
+    except ValidationError as e:
+        print(f"Error: {e}")
+        return jsonify(e.messages), 400
+    
+    new_customer_account = CustomerAccount(username=customer_account_data['username'], password=customer_account_data['password'], customer_id=customer_account_data['customer_id'])
+    db.session.add(new_customer_account)
+    db.session.commit()
+    return jsonify({"message":"New customer account successfully added"}), 201
+
+@app.route("/customer_accounts", methods=["GET"])
+def get_customers_accounts():
+     customer_accounts = CustomerAccount.query.all()
+     return customer_accounts_schema.jsonify(customer_accounts)
+
+@app.route("/customer_accounts/<int:id>", methods=['GET'])
+def query_customer_account_by_id(id):
+    customer_account=CustomerAccount.query.get_or_404(id)
+    customer_details=customer_account.customer
+    serialized_customer=customer_schema.dump(customer_details)
+    serialized_customer_account=customer_account_schema.dump(customer_account)
+    return jsonify({
+        "customer":serialized_customer,
+        "customer_account":serialized_customer_account
+    })
+
+@app.route("/customer_accounts/<int:id>", methods=["PUT"])
+def update_customer_account(id):
+    customer_account = CustomerAccount.query.get_or_404(id)
+    try:
+        customer_account_data = customer_account_schema.load(request.json)
+    except ValidationError as e:
+        print(f"Error: {e}")
+        return jsonify(e.messages), 400
+    
+    customer_account.username = customer_account_data['username']
+    customer_account.password = customer_account_data['password']
+    customer_account.customer_id = customer_account_data['customer_id']
+    db.session.commit()
+    return jsonify({"message":"Customer Account updated successfully"}), 200
 
 #---------------------------------------------------------------------------------------------------------------------------------
 
